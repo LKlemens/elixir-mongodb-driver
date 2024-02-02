@@ -66,8 +66,14 @@ defmodule Mongo.Repo do
           doc = module.timestamps(doc)
 
           case Mongo.insert_one(@topology, collection, module.dump(doc), opts) do
-            {:error, reason} -> {:error, reason}
-            {:ok, %{inserted_id: id}} -> {:ok, %{doc | _id: id}}
+            {:error, reason} ->
+              {:error, reason}
+
+            {:ok, %{inserted_id: id}} ->
+              {:ok,
+               %{doc | _id: id}
+               |> Map.from_struct()
+               |> module.load()}
           end
         end
 
@@ -75,7 +81,7 @@ defmodule Mongo.Repo do
           collection = module.__collection__(:collection)
           doc = module.timestamps(doc)
 
-          case Mongo.update_one(@topology, collection, %{_id: id}, %{"$set" => module.dump(doc)}, opts) do
+          case Mongo.update_one(@topology, collection, module.dump_part(%{_id: id}), %{"$set" => module.dump(doc)}, opts) do
             {:error, reason} -> {:error, reason}
             {:ok, %{modified_count: _}} -> {:ok, doc}
           end
@@ -86,17 +92,25 @@ defmodule Mongo.Repo do
           doc = module.timestamps(doc)
           opts = Keyword.put(opts, :upsert, true)
 
-          case Mongo.update_one(@topology, collection, %{_id: id}, %{"$set" => module.dump(doc)}, opts) do
-            {:error, reason} -> {:error, reason}
-            {:ok, %{upserted_ids: [id]}} -> {:ok, %{doc | _id: id}}
-            {:ok, %{modified_count: _}} -> {:ok, doc}
+          case Mongo.update_one(@topology, collection, module.dump_part(%{_id: id}), %{"$set" => module.dump(doc)}, opts) do
+            {:error, reason} ->
+              {:error, reason}
+
+            {:ok, %{upserted_ids: [id]}} ->
+              {:ok,
+               %{doc | _id: id}
+               |> Map.from_struct()
+               |> module.load()}
+
+            {:ok, %{modified_count: _}} ->
+              {:ok, doc}
           end
         end
 
         def delete(%{__struct__: module, _id: id} = doc, opts \\ []) do
           collection = module.__collection__(:collection)
 
-          case Mongo.delete_one(@topology, collection, %{_id: id}, opts) do
+          case Mongo.delete_one(@topology, collection, module.dump_part(%{_id: id}), opts) do
             {:ok, %{deleted_count: 1}} -> {:ok, doc}
             {:ok, %{deleted_count: 0}} -> {:error, :not_found}
             {:error, reason} -> {:error, reason}
@@ -116,14 +130,14 @@ defmodule Mongo.Repo do
         def insert!(%{__struct__: module} = doc, opts \\ []) do
           collection = module.__collection__(:collection)
           doc = module.timestamps(doc)
-          %{inserted_id: id} = Mongo.insert_one!(@topology, collection, module.dump(doc), opts)
-          %{doc | _id: id}
+          Mongo.insert_one!(@topology, collection, module.dump(doc), opts)
+          doc
         end
 
         def update!(%{__struct__: module, _id: id} = doc, opts \\ []) do
           collection = module.__collection__(:collection)
           doc = module.timestamps(doc)
-          Mongo.update_one!(@topology, collection, %{_id: id}, %{"$set" => module.dump(doc)}, opts)
+          Mongo.update_one!(@topology, collection, module.dump_part(%{_id: id}), %{"$set" => module.dump(doc)}, opts)
           doc
         end
 
@@ -131,17 +145,22 @@ defmodule Mongo.Repo do
           collection = module.__collection__(:collection)
           doc = module.timestamps(doc)
           opts = Keyword.put(opts, :upsert, true)
-          update_one_result = Mongo.update_one!(@topology, collection, %{_id: id}, %{"$set" => module.dump(doc)}, opts)
+          update_one_result = Mongo.update_one!(@topology, collection, module.dump_part(%{_id: id}), %{"$set" => module.dump(doc)}, opts)
 
           case update_one_result do
-            %{upserted_ids: [id]} -> %{doc | _id: id}
-            %{modified_count: _} -> doc
+            %{upserted_ids: [id]} ->
+              %{doc | _id: id}
+              |> Map.from_struct()
+              |> module.load()
+
+            %{modified_count: _} ->
+              doc
           end
         end
 
         def delete!(%{__struct__: module, _id: id} = doc, opts \\ []) do
           collection = module.__collection__(:collection)
-          delete_result = Mongo.delete_one!(@topology, collection, %{_id: id}, opts)
+          delete_result = Mongo.delete_one!(@topology, collection, module.dump_part(%{_id: id}), opts)
 
           case delete_result do
             %{deleted_count: 1} -> doc
@@ -203,7 +222,7 @@ defmodule Mongo.Repo do
       def get(module, id, opts \\ []) do
         collection = module.__collection__(:collection)
 
-        case Mongo.find_one(@topology, collection, %{_id: id}, opts) do
+        case Mongo.find_one(@topology, collection, module.dump_part(%{_id: id}), opts) do
           {:error, _reason} = error -> error
           value -> module.load(value)
         end
